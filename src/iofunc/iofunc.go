@@ -4,7 +4,7 @@ import (
 	"net"
 	"os"
 	"strings"
-	"fmt"
+	//"fmt"
 )
 
 //Recieve from conn
@@ -42,5 +42,3 @@ func ToConsole(str string) {
 	fmt.Println(str)
 }
 
-
-//func main(){}

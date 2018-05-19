@@ -4,12 +4,10 @@ import (
 	"fmt"
 	io "iofunc" //Replace later on
 	"net"
-	"sync"
 )
 
 var UserDB map[string]string
 var UserConn map[string]net.Conn
-var wg = sync.WaitGroup{}
 
 func main() {
 	//Initialize data maps
@@ -19,29 +17,21 @@ func main() {
 
 	io.ToConsole("Server On.\nWaiting for users.")
 
-	//ln, _ := net.Listen("tcp", ":8081")
-	//conn, _ := ln.Accept()
-	//go User(conn, UserDB, UserConn) //Need to improve.
-
 	/* LATER ADDING COMMANDS TO SERVER CONSOLE
 	for command := FromConsole();command!="exit"{
 
 	}*/
-
-	for i := 0; i < 2; i++ {
+	for i := 0; ; i++ { 
 		ln1, err := net.Listen("tcp", ":8081")
 		for err != nil {
 			ln1, err = net.Listen("tcp", ":8081")
 		}
 
 		conn1, _ := ln1.Accept()
+
 		go User(conn1, UserDB, UserConn) //Need to improve.
 
 	}
-}
-
-func Broadcast(conn net.Conn, UserDB map[string]string, UserConn map[string]net.Conn) {
-
 }
 
 func User(conn net.Conn, UserDB map[string]string, UserConn map[string]net.Conn) { //User Handler
@@ -55,32 +45,15 @@ func User(conn net.Conn, UserDB map[string]string, UserConn map[string]net.Conn)
 	PrintOnline(UserConn)
 
 	//Temporary service. connflag==true means connection has been established
-	for connflag == true {
-
-		/*
-			message, err := FromConnErr(conn)
-			if err != nil { //Disconnected user
-
-				fmt.Println(username + " disconnected")
-				break
-			}
-			ToConsole(username + "> " + message)
-			//modify how i/o works
-			//newmessage := message
-			fmt.Print("You> ")
-			text := FromConsole()
-			ToConn(conn, "SERVER> "+text)*/
-		wg.Add(1)
-		go Listener(conn, username)
-		wg.Add(1)
-		go Writer(conn)
-		wg.Wait()
+	if connflag == true {
+		go Writer(conn, UserConn, username)	//Run Writer
+		Listener(conn, UserConn, username) //UserHandler terminates when listener terminates
 	}
 }
 
-func Listener(conn net.Conn, username string) {
+//Listens until connection error
+func Listener(conn net.Conn, UserConn map[string]net.Conn, username string) {
 	defer conn.Close()
-	defer wg.Done()
 	for {
 		str, err := io.FromConnErr(conn)
 		if err != nil {
@@ -88,21 +61,36 @@ func Listener(conn net.Conn, username string) {
 			return
 		}
 		io.ToConsole(str)
+		BroadcastFromOne(conn, UserConn, username, str) //Broadcast from one user to all others
 	}
 }
 
-func Writer(conn net.Conn) {
+//Broadcast(str) from one user(username,conn) to all others in UserConn map
+func BroadcastFromOne(conn net.Conn, UserConn map[string]net.Conn, username , str string ) {
+		for user , userconn := range UserConn {
+			if user == username {continue}
+			io.ToConn(userconn,str)
+		}
+}
+
+//Keeps Writing stuff, tracks commands
+func Writer(conn net.Conn ,UserConn map[string]net.Conn, username string) {
 	defer conn.Close()
-	defer wg.Done()
 	for {
-		//fmt.Print("You> ")
 		text := io.FromConsole()
 		if text == "quit" {
 			io.ToConsole("Closing Connection")
 			return
 		}
-		io.ToConn(conn, "SERVER> "+text)
+		BroadcastToAll(UserConn,"SERVER> "+text )
 	}
+}
+
+//Broadcast(str) to all users in UserConn map
+func BroadcastToAll(UserConn map[string]net.Conn, str string ) {
+		for _ , userconn := range UserConn {
+			io.ToConn(userconn,str)
+		}
 }
 
 func PrintOnline(UserConn map[string]net.Conn) {

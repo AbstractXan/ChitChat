@@ -3,14 +3,14 @@ package main
 import (
 	"net"
     io "iofunc" //Replace later on
-    "sync"
+
 )
 
 //Set some 'anon' by default before distributing codes
 //Keep a server check for users to type in new usernames
 var username string
 var serverip = "127.0.0.1:8081"
-var wg = sync.WaitGroup{}
+
 
 func main() {
 
@@ -27,8 +27,8 @@ func main() {
 
 	//Sending username
   	io.ToConsole(io.FromConn(conn))
-	io.ToConn(conn,username + "\n")
-	//fmt.Fprintf(conn, username + "\n")
+	io.ToConn(conn,username)
+
 
 	//Sending Password
   	io.ToConsole(io.FromConn(conn))
@@ -46,16 +46,12 @@ func main() {
     return
   }
 */
-  	wg.Add(1)
-  	go Listener(conn)
-  	wg.Add(1)
-  	go Writer(conn)
-  	wg.Wait()
+  	go Writer(conn,username)
+  	Listener(conn)
 }
 
 func Listener(conn net.Conn){
 	defer conn.Close();
-	defer wg.Done()
 	for{
 		str, err := io.FromConnErr(conn)
 		if err!=nil{
@@ -66,16 +62,14 @@ func Listener(conn net.Conn){
 	}
 }
 
-func Writer(conn net.Conn){
+func Writer(conn net.Conn, username string){
 	defer conn.Close();
-	defer wg.Done()
 	for {
-    //fmt.Print("You> ")
     text := io.FromConsole()
     	if text=="quit" {
     		io.ToConsole("Closing Connection")
     		return
     	}
-    io.ToConn(conn,text)
+    io.ToConn(conn,username+"> "+text)
 	}
 }
