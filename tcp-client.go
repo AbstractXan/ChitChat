@@ -1,52 +1,81 @@
 package main
 
-import(
+import (
 	"net"
-	"fmt"
-	"bufio"
-	"os"
+    io "iofunc" //Replace later on
+    "sync"
 )
 
-//Set some 'anon' 
-var username = "Xan" 
-
-
-func GetServerMessage(conn net.Conn){
-  serv_message, _ := bufio.NewReader(conn).ReadString('\n')
-  fmt.Print(serv_message)
-}
+//Set some 'anon' by default before distributing codes
+//Keep a server check for users to type in new usernames
+var username string
+var serverip = "127.0.0.1:8081"
+var wg = sync.WaitGroup{}
 
 func main() {
-  conn, _ := net.Dial("tcp", "127.0.0.1:8081")
-  defer conn.Close();
-  
-  //Sending username
-  GetServerMessage(conn)
-  conn.Write([]byte(username + "\n"))
-  //fmt.Fprintf(conn, username + "\n")
 
-  //Sending Password
-  GetServerMessage(conn)
-  fmt.Print("Password: ")
-  
-  //Reading password from console
-  reader := bufio.NewReader(os.Stdin)
-  pass , _ := reader.ReadString('\n')
-  conn.Write([]byte(pass + "\n"))
+  io.ToConsole("Enter your username.")
+  username=io.FromConsole()
 
-  for { 
-    reader := bufio.NewReader(os.Stdin)
-    fmt.Print("You> ")
-    txt, _ := reader.ReadString('\n')
-
-    fmt.Fprintf(conn, txt + "\n")
-    
-    message, _ := bufio.NewReader(conn).ReadString('\n')
-    fmt.Println("Server> "+message)
+  var conn net.Conn
+  var err error
+  //fmt.Println("Coudn't connect to server: %s\nPlease check your server ip",serverip)
+  for{
+  conn, err = net.Dial("tcp", serverip)
+   if err == nil{break}
   }
+
+	//Sending username
+  	io.ToConsole(io.FromConn(conn))
+	io.ToConn(conn,username + "\n")
+	//fmt.Fprintf(conn, username + "\n")
+
+	//Sending Password
+  	io.ToConsole(io.FromConn(conn))
+	io.ToConsole("Password: ")
+
+	//Reading password from console
+	pass:=io.FromConsole()
+	io.ToConn(conn,pass)
+
+  /*GetConfirmation
+  Conf:=FromConn()
+  if Conf==false{
+    ToConsole("Confirmation failed")
+    conn.Close();
+    return
+  }
+*/
+  	wg.Add(1)
+  	go Listener(conn)
+  	wg.Add(1)
+  	go Writer(conn)
+  	wg.Wait()
 }
 
+func Listener(conn net.Conn){
+	defer conn.Close();
+	defer wg.Done()
+	for{
+		str, err := io.FromConnErr(conn)
+		if err!=nil{
+				io.ToConsole("Server Disconnected")
+				return
+			}
+		io.ToConsole(str)
+	}
+}
 
-//Changes:
-//  fmt.Fprintf(conn, username + "\n") -> Removed as it only prints.
-//  conn.Write([]byte(username + "\n")) -> Actually passes variables
+func Writer(conn net.Conn){
+	defer conn.Close();
+	defer wg.Done()
+	for {
+    //fmt.Print("You> ")
+    text := io.FromConsole()
+    	if text=="quit" {
+    		io.ToConsole("Closing Connection")
+    		return
+    	}
+    io.ToConn(conn,text)
+	}
+}

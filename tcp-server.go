@@ -1,14 +1,15 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
+	io "iofunc" //Replace later on
 	"net"
-	"strings" //Try to remove this
+	"sync"
 )
 
 var UserDB map[string]string
 var UserConn map[string]net.Conn
+var wg = sync.WaitGroup{}
 
 func main() {
 	//Initialize data maps
@@ -16,77 +17,163 @@ func main() {
 	UserConn := make(map[string]net.Conn)
 	UserDB["Xan"] = "123"
 
-	fmt.Println("Server On. Waiting for request.")
-	ln, _ := net.Listen("tcp", ":8081")
-	conn, _ := ln.Accept()
-	User(conn,UserDB,UserConn)	//Need to improve.
-}
+	io.ToConsole("Server On.\nWaiting for users.")
 
-func User(conn net.Conn, UserDB map[string]string, UserConn map[string]net.Conn) { //User Handler
-	defer conn.Close();
-	connflag, username := Login(conn,UserDB,UserConn) //!!!!!!flag, username
-	for connflag == true {
-		message, err := bufio.NewReader(conn).ReadString('\n')
-		if err != nil {
+	//ln, _ := net.Listen("tcp", ":8081")
+	//conn, _ := ln.Accept()
+	//go User(conn, UserDB, UserConn) //Need to improve.
 
-			fmt.Println(username + " disconnected")
-			break
+	/* LATER ADDING COMMANDS TO SERVER CONSOLE
+	for command := FromConsole();command!="exit"{
+
+	}*/
+
+	for i := 0; i < 2; i++ {
+		ln1, err := net.Listen("tcp", ":8081")
+		for err != nil {
+			ln1, err = net.Listen("tcp", ":8081")
 		}
-		fmt.Print("Person>", message)
 
-		//modify how i/o works
-		newmessage := message
-		conn.Write([]byte(newmessage + "\n"))
+		conn1, _ := ln1.Accept()
+		go User(conn1, UserDB, UserConn) //Need to improve.
+
 	}
 }
 
-func GetClientString(conn net.Conn)string{
-	str, _ := bufio.NewReader(conn).ReadString('\n')
-	str = strings.TrimSpace(str) //Trim extra spaces
-	return str
+func Broadcast(conn net.Conn, UserDB map[string]string, UserConn map[string]net.Conn) {
+
 }
 
-func MessageToClient(conn net.Conn,mess string){
-	conn.Write([]byte(mess))
+func User(conn net.Conn, UserDB map[string]string, UserConn map[string]net.Conn) { //User Handler
+	defer conn.Close()
+
+	//Login
+	connflag, username := Login(conn, UserDB, UserConn)
+	// If connection exists, read from user
+
+	//Printing Online users
+	PrintOnline(UserConn)
+
+	//Temporary service. connflag==true means connection has been established
+	for connflag == true {
+
+		/*
+			message, err := FromConnErr(conn)
+			if err != nil { //Disconnected user
+
+				fmt.Println(username + " disconnected")
+				break
+			}
+			ToConsole(username + "> " + message)
+			//modify how i/o works
+			//newmessage := message
+			fmt.Print("You> ")
+			text := FromConsole()
+			ToConn(conn, "SERVER> "+text)*/
+		wg.Add(1)
+		go Listener(conn, username)
+		wg.Add(1)
+		go Writer(conn)
+		wg.Wait()
+	}
 }
-func Login(conn net.Conn,UserDB map[string]string, UserConn map[string]net.Conn) (bool, string) {
-	//Initializing data maps
+
+func Listener(conn net.Conn, username string) {
+	defer conn.Close()
+	defer wg.Done()
+	for {
+		str, err := io.FromConnErr(conn)
+		if err != nil {
+			io.ToConsole(username + " Disconnected")
+			return
+		}
+		io.ToConsole(str)
+	}
+}
+
+func Writer(conn net.Conn) {
+	defer conn.Close()
+	defer wg.Done()
+	for {
+		//fmt.Print("You> ")
+		text := io.FromConsole()
+		if text == "quit" {
+			io.ToConsole("Closing Connection")
+			return
+		}
+		io.ToConn(conn, "SERVER> "+text)
+	}
+}
+
+func PrintOnline(UserConn map[string]net.Conn) {
+	io.ToConsole("Online users are:")
+	for v, c := range UserConn {
+		fmt.Printf(v + " ")
+		fmt.Println(c)
+		fmt.Print("\n")
+	}
+}
+
+func Login(conn net.Conn, UserDB map[string]string, UserConn map[string]net.Conn) (bool, string) {
 
 	//Read Username Request
-	//conn.Write([]byte("Reading your username...\n"))
-	MessageToClient(conn,"Reading your username...\n")
-	username, _ := bufio.NewReader(conn).ReadString('\n')
-	username = strings.TrimSpace(username) //Trim extra spaces
-	fmt.Println("Username: " + username)
+	io.ToConn(conn, "Reading your username...\n")
+	username := io.FromConn(conn)
+	io.ToConsole("Username:" + username)
+	//fmt.Println("Username: " + username)
 
 	//Register password / Login /Kick
 	if _, ok := UserDB[username]; ok == false {
 
 		//If username absent, enter a new password
-		conn.Write([]byte("Enter a new password for "+username+"\n"))
-		pass := GetClientString(conn); //GetPasswordValue
+		io.ToConn(conn, "Enter a new password for "+username+"\n")
+		pass := io.FromConn(conn) //GetPasswordValue
 
 		UserDB[username] = pass   //Accept username and pass
 		UserConn[username] = conn //Accept connection
-		fmt.Println("Pass: " + pass)
-		fmt.Println(username + " registered and connected.\n")
+		io.ToConsole("Pass: " + pass)
+		io.ToConsole(username + " registered and connected.\n")
 		return true, username
 
 	} else {
 
 		//USER exists, check password
-		conn.Write([]byte("Enter password for " + username + "\n"))
-		pass := GetClientString(conn); //GetPasswordValue
+		io.ToConn(conn, "Enter password for "+username+"\n")
+		pass := io.FromConn(conn) //GetPasswordValue
 
 		if UserDB[username] != pass {
+
 			conn.Close() //Close connection
-			fmt.Printf("%s kicked.\nREASON: WRONG PASSWORD.\n", username)
+			io.ToConsole(username + " kicked.\nREASON: WRONG PASSWORD.\n")
 			return false, username //Send failure
 		} else {
+
 			UserConn[username] = conn //Accept connection
-			fmt.Printf("%s connected.\n", username)
+			io.ToConsole(username + " connected.\n")
 			return true, username //Return true
 		}
 	}
-
 }
+
+//func request()
+
+/*func chatroom(conn1 net.Conn,conn2 net.Conn)
+{
+	p1,p2=net.pipe()
+
+	go func(){
+		for connflag == true {
+		message, err := bufio.NewReader(conn).ReadString('\n')
+		if err != nil { //Disconnected user
+
+			fmt.Println(username + " disconnected")
+			break
+		}
+		ToConsole("Person> "+message)
+		//modify how i/o works
+		newmessage := message
+		ToConn(conn,newmessage)
+	}
+  	}
+}
+*/
