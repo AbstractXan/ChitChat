@@ -1,75 +1,90 @@
 package main
 
 import (
+	io "iofunc"
 	"net"
-    io "iofunc" //Replace later on
-
 )
 
-//Set some 'anon' by default before distributing codes
-//Keep a server check for users to type in new usernames
-var username string
-var serverip = "127.0.0.1:8081"
-
-
-func main() {
-
-  io.ToConsole("Enter your username.")
-  username=io.FromConsole()
-
-  var conn net.Conn
-  var err error
-  //fmt.Println("Coudn't connect to server: %s\nPlease check your server ip",serverip)
-  for{
-  conn, err = net.Dial("tcp", serverip)
-   if err == nil{break}
-  }
-
-	//Sending username
-  	io.ToConsole(io.FromConn(conn))
-	io.ToConn(conn,username)
-
-
-	//Sending Password
-  	io.ToConsole(io.FromConn(conn))
-	io.ToConsole("Password: ")
-
-	//Reading password from console
-	pass:=io.FromConsole()
-	io.ToConn(conn,pass)
-
-  /*GetConfirmation
-  Conf:=FromConn()
-  if Conf==false{
-    ToConsole("Confirmation failed")
-    conn.Close();
-    return
-  }
-*/
-  	go Writer(conn,username)
-  	Listener(conn)
+type UserType struct {
+	Name     string
+	Serverip string
 }
 
-func Listener(conn net.Conn){
-	defer conn.Close();
-	for{
+func NewUser() *UserType {
+	var u UserType
+
+	io.ToConsole("Enter your userame.")
+	u.Name = io.FromConsole()
+
+	io.ToConsole("Enter Server IP (Port defaults to 8081).")
+	u.Serverip = io.FromConsole() + ":8081"
+	return &u
+}
+func main() {
+	//Setup New User
+	User := NewUser()
+
+	//Connect
+	conn := User.GetConn()
+	User.LoginHandler(conn)
+	go User.Writer(conn)
+	User.Listener(conn)
+}
+
+func (User *UserType) GetConn() net.Conn {
+	var conn net.Conn
+	var err error
+
+	for {
+		conn, err = net.Dial("tcp", User.Serverip)
+		if err == nil {
+			break
+		}
+	}
+	return conn
+}
+
+//Listens to any input from connection
+func (User *UserType) Listener(conn net.Conn) {
+	defer conn.Close()
+	for {
 		str, err := io.FromConnErr(conn)
-		if err!=nil{
-				io.ToConsole("Server Disconnected")
-				return
-			}
+		if err != nil {
+			io.ToConsole("Server Disconnected")
+			return
+		}
 		io.ToConsole(str)
 	}
 }
 
-func Writer(conn net.Conn, username string){
-	defer conn.Close();
+//Keeps Writing to the connection
+func (User *UserType) Writer(conn net.Conn) {
+	defer conn.Close()
 	for {
-    text := io.FromConsole()
-    	if text=="quit" {
-    		io.ToConsole("Closing Connection")
-    		return
-    	}
-    io.ToConn(conn,username+"> "+text)
+		text := io.FromConsole()
+		if text == "quit" {
+			io.ToConsole("Closing Connection")
+			return
+		}
+		io.ToConn(conn, text)
 	}
+}
+
+//Login Handler made wrt Server
+func (User *UserType) LoginHandler(conn net.Conn) {
+	//Accept Server Name
+	io.ToConsole(io.FromConn(conn))
+
+	//Sending Name
+	io.ToConn(conn, User.Name)
+
+	//Sending Password
+	io.ToConsole(io.FromConn(conn))
+
+	//Reading password from console
+	pass := io.FromConsole()
+	io.ToConn(conn, pass)
+
+	//Affirmation from Server
+	io.ToConsole(io.FromConn(conn))
 }

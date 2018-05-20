@@ -1,27 +1,40 @@
 package main
 
 import (
-	"fmt"
-	io "iofunc" //Replace later on
+	io "iofunc"
 	"net"
 )
 
-var UserDB map[string]string
-var UserConn map[string]net.Conn
+type ServerType struct {
+	UserDB   map[string]string
+	UserConn map[string]net.Conn
+	Name     string
+	//GoRoutines int
+}
+
+//Initializes and returns a new Server
+func NewServerType() *ServerType {
+	var s ServerType
+
+	//Server name
+	io.ToConsole("Enter a Server Name: ")
+	s.Name = io.FromConsole()
+
+	//Variables
+	s.UserDB = make(map[string]string)
+	s.UserConn = make(map[string]net.Conn)
+
+	//Constants
+	s.UserDB["Xan"] = "123"
+	return &s
+}
 
 func main() {
-	//Initialize data maps
-	UserDB := make(map[string]string)
-	UserConn := make(map[string]net.Conn)
-	UserDB["Xan"] = "123"
-
+	Server := NewServerType()
 	io.ToConsole("Server On.\nWaiting for users.")
 
-	/* LATER ADDING COMMANDS TO SERVER CONSOLE
-	for command := FromConsole();command!="exit"{
-
-	}*/
-	for i := 0; ; i++ { 
+	//Loop to recieve and accept new connections
+	for i := 0; ; i++ {
 		ln1, err := net.Listen("tcp", ":8081")
 		for err != nil {
 			ln1, err = net.Listen("tcp", ":8081")
@@ -29,30 +42,90 @@ func main() {
 
 		conn1, _ := ln1.Accept()
 
-		go User(conn1, UserDB, UserConn) //Need to improve.
+		go Server.UserHandler(conn1) //Need to improve.
 
 	}
 }
 
-func User(conn net.Conn, UserDB map[string]string, UserConn map[string]net.Conn) { //User Handler
+//User Handler
+func (Server *ServerType) UserHandler(conn net.Conn) {
 	defer conn.Close()
 
 	//Login
-	connflag, username := Login(conn, UserDB, UserConn)
-	// If connection exists, read from user
+	connflag, username := Server.LoginHandler(conn)
 
 	//Printing Online users
-	PrintOnline(UserConn)
-
 	//Temporary service. connflag==true means connection has been established
 	if connflag == true {
-		go Writer(conn, UserConn, username)	//Run Writer
-		Listener(conn, UserConn, username) //UserHandler terminates when listener terminates
+		Server.BroadcastToAll(Server.GetOnline())
+		go Server.Writer(conn)          //Run Writer
+		Server.Listener(conn, username) //UserHandler terminates when listener terminates
 	}
 }
 
+//Handles Login for each user
+func (Server *ServerType) LoginHandler(conn net.Conn) (bool, string) {
+
+	//Send Server Name
+	io.ToConn(conn, "[SERVER] Welcome to Chit-Chat server: "+Server.Name+ "Reading your username.")
+
+	//Read Username Request
+	username := io.FromConn(conn)
+	
+	//Register password / Login /Kick
+	//Password DNE => Add new user
+	//Password Exists => Check password
+	if _, boolpass := Server.UserDB[username]; boolpass == false {
+
+		//If username absent, enter a new password
+		io.ToConn(conn, "[Server] >> Enter a new password for "+username+"\n")
+		pass := io.FromConn(conn) //GetPasswordValue
+
+		Server.UserDB[username] = pass   //Accept username and pass
+		Server.UserConn[username] = conn //Accept connection
+		io.ToConsole("[LOGIN] >>" + username + ": " + pass + " registered and connected.\n")
+		io.ToConn(conn, "[SERVER] >> "+username+" registered and connected.\n")
+		return true, username
+
+		//Check if user already online
+	} else if _, boolOnline := Server.UserConn[username]; boolOnline == false {
+		//USER exists, check password
+		io.ToConn(conn, "[SERVER] >> Enter password for "+username+"\n")
+		pass := io.FromConn(conn) //GetPasswordValue
+
+		//No pwd match => KICK
+		if Server.UserDB[username] != pass {
+
+			io.ToConsole("[LOGIN] >> " + username + " kicked.WRONG PASSWORD.\n")
+			io.ToConn(conn, "[SERVER] >> "+username+" kicked. WRONG PASSWORD.\n")
+			conn.Close()           //Close connection
+			return false, username //Send failure
+
+			//Pwd Match => Accept
+		} else {
+
+			Server.UserConn[username] = conn //Accept connection
+			io.ToConsole("[LOGIN] >> " + username + " connected.")
+			io.ToConn(conn, "[SERVER] >> Connected.")
+			return true, username //Return true
+		}
+
+		//Kick if already online
+	} else {
+		io.ToConn(conn, "[SERVER] >> Enter password for "+username+"\n")
+		_ = io.FromConn(conn) //GetPasswordValue
+		io.ToConsole("[LOGIN HANDLER] >> " + username + " kicked. REASON: User is Already Online.")
+		io.ToConn(conn, "[SERVER] >> "+username+" kicked. REASON: USER IS ALREADY ONLINE.")
+		conn.Close()           //Close connection
+		return false, username //Send failure
+	}
+}
+
+//Other useful IO functions
 //Listens until connection error
-func Listener(conn net.Conn, UserConn map[string]net.Conn, username string) {
+func (Server *ServerType) Listener(conn net.Conn, username string) {
+	//Delete username from active connections
+	defer delete(Server.UserConn, username)
 	defer conn.Close()
 	for {
 		str, err := io.FromConnErr(conn)
@@ -60,21 +133,23 @@ func Listener(conn net.Conn, UserConn map[string]net.Conn, username string) {
 			io.ToConsole(username + " Disconnected")
 			return
 		}
-		io.ToConsole(str)
-		BroadcastFromOne(conn, UserConn, username, str) //Broadcast from one user to all others
+		io.ToConsole(username + "> " + str)
+		Server.BroadcastFromOne(conn, username+"> "+str) //Broadcast from one user to all others
 	}
 }
 
 //Broadcast(str) from one user(username,conn) to all others in UserConn map
-func BroadcastFromOne(conn net.Conn, UserConn map[string]net.Conn, username , str string ) {
-		for user , userconn := range UserConn {
-			if user == username {continue}
-			io.ToConn(userconn,str)
+func (Server *ServerType) BroadcastFromOne(conn net.Conn, str string) {
+	for _, uconn := range Server.UserConn {
+		if conn == uconn {
+			continue
 		}
+		io.ToConn(uconn, str)
+	}
 }
 
 //Keeps Writing stuff, tracks commands
-func Writer(conn net.Conn ,UserConn map[string]net.Conn, username string) {
+func (Server *ServerType) Writer(conn net.Conn) {
 	defer conn.Close()
 	for {
 		text := io.FromConsole()
@@ -82,86 +157,32 @@ func Writer(conn net.Conn ,UserConn map[string]net.Conn, username string) {
 			io.ToConsole("Closing Connection")
 			return
 		}
-		BroadcastToAll(UserConn,"SERVER> "+text )
+		Server.BroadcastToAll("SERVER> " + text)
 	}
 }
 
 //Broadcast(str) to all users in UserConn map
-func BroadcastToAll(UserConn map[string]net.Conn, str string ) {
-		for _ , userconn := range UserConn {
-			io.ToConn(userconn,str)
-		}
-}
-
-func PrintOnline(UserConn map[string]net.Conn) {
-	io.ToConsole("Online users are:")
-	for v, c := range UserConn {
-		fmt.Printf(v + " ")
-		fmt.Println(c)
-		fmt.Print("\n")
+func (Server *ServerType) BroadcastToAll(str string) {
+	for _, uconn := range Server.UserConn {
+		io.ToConn(uconn, str)
 	}
 }
 
-func Login(conn net.Conn, UserDB map[string]string, UserConn map[string]net.Conn) (bool, string) {
-
-	//Read Username Request
-	io.ToConn(conn, "Reading your username...\n")
-	username := io.FromConn(conn)
-	io.ToConsole("Username:" + username)
-	//fmt.Println("Username: " + username)
-
-	//Register password / Login /Kick
-	if _, ok := UserDB[username]; ok == false {
-
-		//If username absent, enter a new password
-		io.ToConn(conn, "Enter a new password for "+username+"\n")
-		pass := io.FromConn(conn) //GetPasswordValue
-
-		UserDB[username] = pass   //Accept username and pass
-		UserConn[username] = conn //Accept connection
-		io.ToConsole("Pass: " + pass)
-		io.ToConsole(username + " registered and connected.\n")
-		return true, username
-
-	} else {
-
-		//USER exists, check password
-		io.ToConn(conn, "Enter password for "+username+"\n")
-		pass := io.FromConn(conn) //GetPasswordValue
-
-		if UserDB[username] != pass {
-
-			conn.Close() //Close connection
-			io.ToConsole(username + " kicked.\nREASON: WRONG PASSWORD.\n")
-			return false, username //Send failure
-		} else {
-
-			UserConn[username] = conn //Accept connection
-			io.ToConsole(username + " connected.\n")
-			return true, username //Return true
-		}
+//Command functions
+//Prints Online Users
+func (Server *ServerType) GetOnline() string {
+	str := "Online users are: "
+	for user, _ := range Server.UserConn {
+		str = str + user + " | "
 	}
+	io.ToConsole(str)
+	return str
 }
 
-//func request()
-
-/*func chatroom(conn1 net.Conn,conn2 net.Conn)
-{
-	p1,p2=net.pipe()
-
-	go func(){
-		for connflag == true {
-		message, err := bufio.NewReader(conn).ReadString('\n')
-		if err != nil { //Disconnected user
-
-			fmt.Println(username + " disconnected")
-			break
-		}
-		ToConsole("Person> "+message)
-		//modify how i/o works
-		newmessage := message
-		ToConn(conn,newmessage)
-	}
-  	}
-}
+/* Additional updates:
+1. Server Commands
+2. Client Request Handler
+3. Chatrooms
+4. Server Name
+5. Server Discoverable to all
 */
